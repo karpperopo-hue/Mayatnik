@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ночной Маятник</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0a0e22">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#0a0e22;--fg:#eef0ff;--mut:#8a93b8;--lamp:#ffc861;--shard:#6fe3d4;--card:#121936;--line:#2a3566;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:Georgia,"Times New Roman",serif;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 10px);display:none;justify-content:space-between;padding:0 18px;pointer-events:none;font-size:22px}
+#hud b{font-weight:normal;color:var(--lamp)}#hud i{font-style:normal;color:var(--shard)}
+#tip{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 40px);text-align:center;color:var(--mut);font-size:16px;display:none;pointer-events:none}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(6,8,20,.55)}
+.panel{width:100%;max-width:360px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 20px;text-align:center}
+h1{margin:0 0 4px;font-size:30px;font-weight:normal;color:var(--lamp);letter-spacing:.5px}
+.sub{margin:0 0 16px;color:var(--mut);font-size:15px;line-height:1.4}
+.stats{display:flex;justify-content:space-around;margin-bottom:16px}
+.stats div{font-size:13px;color:var(--mut)}.stats b{display:block;font-size:22px;font-weight:normal;color:var(--fg);margin-top:2px}
+button{font:inherit;color:var(--fg);cursor:pointer;touch-action:manipulation}
+#play{width:100%;padding:14px;font-size:20px;background:var(--lamp);color:#1b1430;border:0;border-radius:10px;margin-bottom:14px}
+.up{display:grid;gap:8px}
+.up button{padding:11px 12px;font-size:15px;background:transparent;border:1px solid var(--line);border-radius:10px;text-align:left;display:flex;justify-content:space-between}
+.up button:disabled{opacity:.45}.up span{color:var(--shard)}
+.hint{margin:14px 0 0;font-size:13px;color:var(--mut);line-height:1.45}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><b id="hs">0 м</b><i id="hsh">◆ 0</i></div>
+<div id="tip">Коснись экрана, чтобы отпустить лампу</div>
+<div id="ov"><div class="panel">
+<h1>Ночной Маятник</h1>
+<p class="sub" id="sub">Тьма поднимается. Перелетай от лампы к лампе вверх.</p>
+<div class="stats"><div>Рекорд<b id="best">0 м</b></div><div>Осколки<b id="sh">0</b></div><div id="lb" style="display:none">Забег<b id="last">0 м</b></div></div>
+<button id="play">Играть</button>
+<div class="up"><button id="u1"></button><button id="u2"></button></div>
+<p class="hint">Ты кружишь вокруг лампы. Касание — отпустить и лететь по прямой. Поймай новую лампу: она светит и отодвигает тьму. Собирай осколки на улучшения.</p>
+</div></div>
+<script>
+(()=>{
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const WW=360,SPD=170;
+let W,H,S,VH;
+function rs(){const d=Math.min(window.devicePixelRatio||1,2);W=cv.width=Math.round(innerWidth*d);H=cv.height=Math.round(innerHeight*d);S=W/WW;VH=H/S}
+addEventListener('resize',rs);rs();
+
+let save={best:0,shards:0,u1:0,u2:0};
+try{Object.assign(save,JSON.parse(localStorage.getItem('lantern_v1')||'{}'))}catch(e){}
+function persist(){try{localStorage.setItem('lantern_v1',JSON.stringify(save))}catch(e){}}
+
+let seed=1;
+function rnd(){seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}
+
+let st='menu',run=null,tipShown=0;
+
+function newRun(){
+  seed=(Date.now()^(Math.random()*1e9))|0;
+  const a={x:180,y:0,lit:true};
+  run={anchors:[a],shards:[],top:0,p:{x:140,y:0,vx:0,vy:0},mode:'orbit',cur:a,ang:Math.PI,dir:1,R:40,last:null,lastT:0,dark:230,camY:-VH*0.62,t:0,h:0,sh:0,got:0,trail:[]};
+  gen();
+}
+function gen(){
+  const r=run;
+  while(r.top>r.camY-220){
+    const prev=r.anchors[r.anchors.length-1];
+    const dy=60+rnd()*35,dx=(rnd()*2-1)*105;
+    const x=Math.max(35,Math.min(325,prev.x+dx)),y=prev.y-dy;
+    r.anchors.push({x,y,lit:false});r.top=y;
+    if(rnd()<.6)r.shards.push({x:(prev.x+x)/2+(rnd()*2-1)*18,y:(prev.y+y)/2});
+  }
+}
+function release(){
+  const r=run,p=r.p,t=r.dir*SPD;
+  p.vx=-Math.sin(r.ang)*t;p.vy=Math.cos(r.ang)*t;
+  r.mode='fly';r.last=r.cur;r.lastT=r.t;
+}
+function catchA(a,d){
+  const r=run,p=r.p,rx=p.x-a.x,ry=p.y-a.y;
+  r.dir=(rx*p.vy-ry*p.vx)>=0?1:-1;
+  r.R=Math.max(28,Math.min(44,d));
+  r.ang=Math.atan2(ry,rx);r.cur=a;r.mode='orbit';
+  if(!a.lit){a.lit=true;r.got++;r.dark=Math.min(r.dark+34,p.y+280)}
+}
+function update(dt){
+  const r=run,p=r.p;r.t+=dt;
+  if(r.mode==='orbit'){
+    r.ang+=r.dir*(SPD/r.R)*dt;
+    p.x=r.cur.x+Math.cos(r.ang)*r.R;p.y=r.cur.y+Math.sin(r.ang)*r.R;
+  }else{
+    p.vy+=70*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
+    if(p.x<6){p.x=6;p.vx=Math.abs(p.vx)}
+    if(p.x>354){p.x=354;p.vx=-Math.abs(p.vx)}
+    const cr=30+5*save.u1;
+    for(const a of r.anchors){
+      if(a===r.last&&r.t-r.lastT<.4)continue;
+      if(Math.abs(a.y-p.y)>cr)continue;
+      const d=Math.hypot(a.x-p.x,a.y-p.y);
+      if(d<cr){catchA(a,d);break}
+    }
+  }
+  r.trail.push({x:p.x,y:p.y});if(r.trail.length>22)r.trail.shift();
+  r.h=Math.max(r.h,-p.y/10);
+  r.dark-=(16+r.h*0.06)*(1-0.1*save.u2)*dt;
+  for(let i=r.shards.length-1;i>=0;i--){
+    const s=r.shards[i];
+    if(Math.hypot(s.x-p.x,s.y-p.y)<15){r.shards.splice(i,1);r.sh++}
+    else if(s.y>r.dark+300)r.shards.splice(i,1);
+  }
+  while(r.anchors.length>3&&r.anchors[0].y>r.dark+400&&r.anchors[0]!==r.cur)r.anchors.shift();
+  const target=p.y-VH*0.62;
+  if(target<r.camY)r.camY+=(target-r.camY)*Math.min(1,5*dt);
+  gen();
+  $('hs').textContent=Math.floor(r.h)+' м';
+  $('hsh').textContent='◆ '+r.sh;
+  if(r.t>6)$('tip').style.display='none';
+  if(p.y>r.dark-2)die();
+}
+function die(){
+  st='over';
+  const h=Math.floor(run.h);
+  const isRecord=h>save.best;
+  save.best=Math.max(save.best,h);save.shards+=run.sh;persist();
+  $('hud').style.display='none';$('tip').style.display='none';
+  $('sub').textContent=isRecord&&h>0?'Новый рекорд! Тьма поймала тебя на высоте '+h+' м.':'Тьма догнала тебя. Потрать осколки и лети выше.';
+  $('lb').style.display='';$('last').textContent=h+' м';
+  $('play').textContent='Ещё раз';
+  ui();$('ov').style.display='flex';
+}
+function start(){
+  newRun();st='play';
+  $('ov').style.display='none';$('hud').style.display='flex';
+  $('tip').style.display=tipShown<3?'block':'none';tipShown++;
+}
+function ui(){
+  $('best').textContent=save.best+' м';$('sh').textContent=save.shards;
+  const defs=[['u1','Радиус ловли'],['u2','Тьма медленнее']];
+  for(const [k,n] of defs){
+    const lv=save[k],b=$(k),cost=10*(lv+1);
+    if(lv>=5){b.disabled=true;b.innerHTML='<em style="font-style:normal">'+n+' · макс.</em><span>5/5</span>'}
+    else{b.disabled=save.shards<cost;b.innerHTML='<em style="font-style:normal">'+n+' · ур. '+lv+'/5</em><span>◆ '+cost+'</span>'}
+  }
+}
+function buy(k){
+  const lv=save[k],cost=10*(lv+1);
+  if(lv>=5||save.shards<cost)return;
+  save.shards-=cost;save[k]++;persist();ui();
+}
+$('play').addEventListener('click',start);
+$('u1').addEventListener('click',()=>buy('u1'));
+$('u2').addEventListener('click',()=>buy('u2'));
+cv.addEventListener('pointerdown',e=>{e.preventDefault();if(st==='play'&&run.mode==='orbit')release()});
+
+function circ(x,y,r,c,a){ctx.globalAlpha=a;ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fill();ctx.globalAlpha=1}
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#080b1c');g.addColorStop(1,'#1b2150');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  if(!run)return;
+  ctx.fillStyle='#cfd6ff';
+  for(let i=0;i<50;i++){
+    const px=((i*7919)%1000)/1000*W;
+    const py=((((i*104729)%1000)/1000*H-run.camY*S*0.15)%H+H)%H;
+    ctx.globalAlpha=.25+((i*37)%10)/25;ctx.fillRect(px,py,S*(i%3?1:1.6),S*(i%3?1:1.6));
+  }
+  ctx.globalAlpha=1;
+  ctx.setTransform(S,0,0,S,0,-run.camY*S);
+  const top=run.camY-30,bot=run.camY+VH+30,cr=30+5*save.u1;
+  for(const a of run.anchors){
+    if(a.y<top||a.y>bot)continue;
+    if(a.lit){circ(a.x,a.y,30,'#ffc861',.14);circ(a.x,a.y,16,'#ffc861',.25);circ(a.x,a.y,6,'#fff2c9',1)}
+    else{
+      ctx.strokeStyle='#8a93b8';ctx.globalAlpha=.18;ctx.lineWidth=1;ctx.setLineDash([3,4]);
+      ctx.beginPath();ctx.arc(a.x,a.y,cr,0,6.2832);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+      circ(a.x,a.y,12,'#5a6aa8',.25);circ(a.x,a.y,5,'#8a93d0',1);
+    }
+  }
+  for(const s of run.shards){
+    if(s.y<top||s.y>bot)continue;
+    const w=.8+.2*Math.sin(run.t*4+s.x);
+    ctx.fillStyle='#6fe3d4';ctx.beginPath();
+    ctx.moveTo(s.x,s.y-7*w);ctx.lineTo(s.x+5,s.y);ctx.lineTo(s.x,s.y+7*w);ctx.lineTo(s.x-5,s.y);ctx.closePath();ctx.fill();
+  }
+  const p=run.p;
+  for(let i=0;i<run.trail.length;i++){const t=run.trail[i];circ(t.x,t.y,1+i*.12,'#ffe7a8',i/run.trail.length*.45)}
+  if(run.mode==='orbit'){
+    ctx.strokeStyle='#ffc861';ctx.globalAlpha=.55;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(run.cur.x,run.cur.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.globalAlpha=1;
+  }
+  circ(p.x,p.y,11,'#ffe7a8',.2);circ(p.x,p.y,5,'#ffffff',1);
+  const d=run.dark,gd=ctx.createLinearGradient(0,d-80,0,d+40);
+  gd.addColorStop(0,'rgba(3,4,10,0)');gd.addColorStop(1,'rgba(3,4,10,.97)');
+  ctx.fillStyle=gd;ctx.fillRect(0,d-80,WW,bot-d+120);
+  ctx.fillStyle='rgba(3,4,10,.97)';ctx.fillRect(0,d+40,WW,bot-d+80);
+}
+let lt=performance.now();
+function loop(now){
+  const dt=Math.min(.033,(now-lt)/1000);lt=now;
+  if(st==='play')update(dt);
+  else if(run){run.t+=dt;run.ang+=run.dir*(SPD/run.R)*dt;run.p.x=run.cur.x+Math.cos(run.ang)*run.R;run.p.y=run.cur.y+Math.sin(run.ang)*run.R}
+  draw();requestAnimationFrame(loop);
+}
+newRun();ui();requestAnimationFrame(loop);
+})();
+</script>
+<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))</script>
+</body>
+</html>
